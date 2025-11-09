@@ -1,0 +1,43 @@
+version: '3.8'
+services:
+  db:
+    image: mysql:8.0
+    restart: always
+    environment:
+      MYSQL_ROOT_PASSWORD: rootpassword
+      MYSQL_DATABASE: ibank
+      MYSQL_USER: ibankuser
+      MYSQL_PASSWORD: ibankpass
+    volumes:
+      - db_data:/var/lib/mysql
+      - ./db/init.sql:/docker-entrypoint-initdb.d/init.sql:ro
+    ports:
+      - "3306:3306"
+  app:
+    build: .
+    depends_on:
+      - db
+    environment:
+      DB_HOST: db
+      DB_PORT: 3306
+      DB_USER: ibankuser
+      DB_PASSWORD: ibankpass
+      DB_NAME: ibank
+      PORT: 3000
+      # Optional SMTP configuration - set SMTP_HOST to enable real email sending.
+      # If SMTP_HOST is empty or not provided, the app uses a mock JSON transport and prints messages to logs.
+      SMTP_HOST: ''
+      SMTP_PORT: ''
+      SMTP_SECURE: 'false'
+      SMTP_USER: ''
+      SMTP_PASS: ''
+      SMTP_FROM: 'no-reply@ibank.local'
+    ports:
+      - "3000:3000"
+    volumes:
+      - .:/usr/src/app
+      - /usr/src/app/node_modules
+    restart: unless-stopped
+
+volumes:
+  db_data:

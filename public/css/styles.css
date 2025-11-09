@@ -1,0 +1,120 @@
+/* Common styles for iBank application */
+body {
+  font-family: Arial, Helvetica, sans-serif;
+  max-width: 900px;
+  margin: 20px auto;
+  padding: 10px;
+}
+
+input[readonly] {
+  background: #ffffff;
+}
+
+.section {
+  display: none;
+}
+
+.grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 10px;
+}
+
+label {
+  display: block;
+  margin-top: 8px;
+}
+
+.modal {
+  position: fixed;
+  left: 0;
+  top: 0;
+  right: 0;
+  bottom: 0;
+  background: rgba(0, 0, 0, 0.4);
+  display: none;
+  align-items: center;
+  justify-content: center;
+}
+
+.modal .box {
+  background: #ffffff;
+  padding: 20px;
+  border-radius: 6px;
+  min-width: 300px;
+}
+
+/* Tuition list styles */
+.tuition-grid {
+  display: grid;
+  grid-template-columns: auto 1fr auto auto;
+  gap: 8px;
+  align-items: center;
+  margin-top: 8px;
+}
+
+.tuition-row {
+  display: grid;
+  grid-template-columns: auto 1fr auto auto;
+  gap: 8px;
+  align-items: center;
+  padding: 8px 0;
+  border-bottom: 1px solid #eee;
+}
+
+/* Button styles */
+.btn {
+  padding: 8px 16px;
+  border: none;
+  border-radius: 4px;
+  cursor: pointer;
+}
+
+.btn:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
+}
+
+.btn-primary {
+  background: #0b74de;
+  color: white;
+}
+
+.btn-success {
+  background: #4CAF50;
+  color: white;
+}
+
+/* Form styling */
+.form-group {
+  margin-bottom: 16px;
+}
+
+/* Alert messages */
+.alert {
+  padding: 12px;
+  border-radius: 4px;
+  margin: 8px 0;
+}
+
+.alert-error {
+  background: #ffebee;
+  color: #c62828;
+  border: 1px solid #ef9a9a;
+}
+
+.alert-success {
+  background: #e8f5e9;
+  color: #2e7d32;
+  border: 1px solid #a5d6a7;
+}
+
+/* Timer styling */
+.timer {
+  font-weight: 600;
+  color: #0b74de;
+}
+
+.error-text {
+  color: #dc3545;
+}

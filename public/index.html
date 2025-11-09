@@ -1,0 +1,76 @@
+<!doctype html>
+<html>
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width,initial-scale=1" />
+    <title>iBank Tuition Payment — Home</title>
+    <link rel="stylesheet" href="css/styles.css">
+  </head>
+  <body>
+    <h1>iBank Tuition Payment</h1>
+
+    <section id="paymentSection">
+      <div style="display:flex;justify-content:space-between;align-items:center">
+        <h2>Tuition Payment</h2>
+        <div>
+          <button id="logoutBtn" class="btn">Logout</button>
+        </div>
+      </div>
+
+      <h3>Payer Information</h3>
+      <div class="grid">
+        <div>
+          <label>Full name<input id="payerName" readonly /></label>
+          <label>Phone<input id="payerPhone" readonly /></label>
+        </div>
+        <div>
+          <label>Email<input id="payerEmail" readonly /></label>
+          <label>Available balance (VND)<input id="availableBalance" readonly /></label>
+        </div>
+      </div>
+
+      <h3>Tuition Information</h3>
+      <div>
+        <label>Student ID<input id="studentId" /></label>
+        <button id="lookupBtn" type="button">Lookup tuition</button>
+        <label>Student full name<input id="studentName" readonly /></label>
+        
+        <div id="tuitionList" style="margin-top:16px">
+          <h4>Pending Tuitions</h4>
+          <div class="tuition-grid" style="display:grid;grid-template-columns:auto 1fr auto auto;gap:8px;align-items:center;margin-top:8px">
+            <div style="font-weight:600">Academic Year</div>
+            <div style="font-weight:600">Description</div>
+            <div style="font-weight:600">Amount (VND)</div>
+            <div></div>
+          </div>
+          <div id="tuitionRows"></div>
+          <p id="noTuitions" style="display:none;color:#666;font-style:italic">No pending tuition fees found.</p>
+        </div>
+      </div>
+
+      <h3>Payment Information</h3>
+      <div>
+        <label><input type="checkbox" id="acceptTerms" /> I accept the terms and conditions</label>
+        <button id="confirmBtn" disabled>Confirm and Send OTP</button>
+      </div>
+    </section>
+
+    <div id="otpModal" class="modal">
+      <div class="box">
+        <h3>Enter OTP</h3>
+        <form id="otpForm">
+          <input type="hidden" id="otpTxId" />
+          <label>OTP Code<input id="otpCode" required /></label>
+          <div id="otpTimer" aria-live="polite" style="margin-top:8px;font-weight:600;color:#0b74de"></div>
+          <div id="otpError" role="alert" aria-live="assertive" style="margin-top:8px;color:#dc3545"></div>
+          <div style="display:flex;gap:8px;margin-top:10px">
+            <button type="submit" id="verifyBtn">Verify and Complete</button>
+            <button type="button" id="resendBtn">Resend OTP</button>
+          </div>
+        </form>
+      </div>
+    </div>
+
+    <script type="module" src="js/payment.js"></script>
+  </body>
+</html>
