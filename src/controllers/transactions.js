@@ -1,6 +1,32 @@
 const pool = require('../db');
 const { generateOtp, hashOtp, sendOtpEmail, sendConfirmationEmail, OTP_TTL_MIN } = require('../mailer');
 
+/**
+ * @openapi
+ * /api/transactions/start:
+ *   post:
+ *     tags:
+ *       - Transactions
+ *     summary: Start a new payment transaction
+ *     security:
+ *       - bearerAuth: []
+ *     requestBody:
+ *       required: true
+ *       content:
+ *         application/json:
+ *           schema:
+ *             type: object
+ *             properties:
+ *               tuitionId:
+ *                 type: integer
+ *             required:
+ *               - tuitionId
+ *     responses:
+ *       200:
+ *         description: Transaction started
+ *       400:
+ *         description: Bad request / insufficient balance
+ */
 async function startTransactionHandler(req, res) {
   try {
     const { tuitionId } = req.body;
@@ -58,6 +84,35 @@ async function startTransactionHandler(req, res) {
 }
 
 async function verifyTransactionHandler(req, res) {
+/**
+ * @openapi
+ * /api/transactions/verify:
+ *   post:
+ *     tags:
+ *       - Transactions
+ *     summary: Verify OTP and complete payment
+ *     security:
+ *       - bearerAuth: []
+ *     requestBody:
+ *       required: true
+ *       content:
+ *         application/json:
+ *           schema:
+ *             type: object
+ *             properties:
+ *               transactionId:
+ *                 type: integer
+ *               otpCode:
+ *                 type: string
+ *             required:
+ *               - transactionId
+ *               - otpCode
+ *     responses:
+ *       200:
+ *         description: Verification result
+ *       400:
+ *         description: Invalid OTP or other error
+ */
   const { transactionId, otpCode } = req.body;
   if (!transactionId || !otpCode) return res.status(400).json({ error: 'missing_fields' });
   const conn = await pool.getConnection();
@@ -139,6 +194,19 @@ async function verifyTransactionHandler(req, res) {
 }
 
 async function historyHandler(req, res) {
+/**
+ * @openapi
+ * /api/transactions/history:
+ *   get:
+ *     tags:
+ *       - Transactions
+ *     summary: Get transaction history for current user
+ *     security:
+ *       - bearerAuth: []
+ *     responses:
+ *       200:
+ *         description: Transaction history
+ */
   try {
     const [rows] = await pool.query('SELECT t.*, s.student_id AS mssv, s.full_name AS student_name FROM transactions t JOIN students s ON s.id = t.target_student_id WHERE t.payer_user_id = ? ORDER BY t.created_at DESC LIMIT 100', [req.user.id]);
     res.json({ transactions: rows });
@@ -149,6 +217,30 @@ async function historyHandler(req, res) {
 }
 
 async function resendOtpHandler(req, res) {
+/**
+ * @openapi
+ * /api/transactions/resend:
+ *   post:
+ *     tags:
+ *       - Transactions
+ *     summary: Resend OTP for a transaction
+ *     security:
+ *       - bearerAuth: []
+ *     requestBody:
+ *       required: true
+ *       content:
+ *         application/json:
+ *           schema:
+ *             type: object
+ *             properties:
+ *               transactionId:
+ *                 type: integer
+ *             required:
+ *               - transactionId
+ *     responses:
+ *       200:
+ *         description: OTP resent
+ */
   try {
     const { transactionId } = req.body;
     if (!transactionId) return res.status(400).json({ error: 'missing_transactionId' });

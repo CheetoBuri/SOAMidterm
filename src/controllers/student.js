@@ -1,5 +1,27 @@
 const pool = require('../db');
 
+/**
+ * @openapi
+ * /api/student/{studentId}:
+ *   get:
+ *     tags:
+ *       - Students
+ *     summary: Get student info and pending tuitions
+ *     security:
+ *       - bearerAuth: []
+ *     parameters:
+ *       - in: path
+ *         name: studentId
+ *         required: true
+ *         schema:
+ *           type: string
+ *         description: Student identifier (mssv)
+ *     responses:
+ *       200:
+ *         description: Student data with pending tuitions
+ *       404:
+ *         description: Student not found
+ */
 async function getStudentHandler(req, res) {
   try {
     const studentId = req.params.studentId;
