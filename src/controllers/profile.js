@@ -1,20 +1,5 @@
 const pool = require('../db');
 
-/**
- * @openapi
- * /api/profile:
- *   get:
- *     tags:
- *       - Profile
- *     summary: Get current user profile
- *     security:
- *       - bearerAuth: []
- *     responses:
- *       200:
- *         description: Profile object
- *       404:
- *         description: User not found
- */
 async function getProfileHandler(req, res) {
   try {
     const [rows] = await pool.query('SELECT id, full_name, phone, email, balance_cents FROM users WHERE id = ?', [req.user.id]);

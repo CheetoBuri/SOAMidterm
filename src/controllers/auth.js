@@ -4,33 +4,6 @@ require('dotenv').config();
 
 const JWT_SECRET = process.env.JWT_SECRET || 'devsecret';
 
-/**
- * @openapi
- * /api/login:
- *   post:
- *     tags:
- *       - Auth
- *     summary: Login with username and password
- *     requestBody:
- *       required: true
- *       content:
- *         application/json:
- *           schema:
- *             type: object
- *             properties:
- *               username:
- *                 type: string
- *               password:
- *                 type: string
- *             required:
- *               - username
- *               - password
- *     responses:
- *       200:
- *         description: Login successful
- *       401:
- *         description: Invalid credentials
- */
 async function loginHandler(req, res) {
   try {
     const { username, password } = req.body;

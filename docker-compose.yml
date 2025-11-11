@@ -13,8 +13,6 @@ services:
       - ./db/init.sql:/docker-entrypoint-initdb.d/init.sql:ro
     ports:
       - "3306:3306"
-    env_file:
-      - .env
   app:
     build: .
     depends_on:
@@ -34,16 +32,12 @@ services:
       SMTP_USER: ''
       SMTP_PASS: ''
       SMTP_FROM: 'no-reply@ibank.local'
-
-    
     ports:
       - "3000:3000"
-      - "3001:3001"
     volumes:
       - .:/usr/src/app
-      - node_modules:/usr/src/app/node_modules
+      - /usr/src/app/node_modules
     restart: unless-stopped
 
 volumes:
   db_data:
-  node_modules:
