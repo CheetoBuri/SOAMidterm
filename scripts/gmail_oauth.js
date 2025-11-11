@@ -21,7 +21,7 @@ async function main() {
   }
 
   // Use a simple redirect URI that works for web apps
-  const redirect = 'http://localhost:3001/auth/callback';
+  const redirect = 'http://localhost:3000/auth/callback';
   const oAuth2Client = new google.auth.OAuth2(client_id, client_secret, redirect);
   const SCOPES = ['https://www.googleapis.com/auth/gmail.send'];
 
@@ -35,7 +35,7 @@ async function main() {
   console.log('1) Open this URL in your browser:\n');
   console.log(authUrl);
   console.log('\n2) Grant permission to the application.');
-  console.log('3) After granting, you will be redirected to localhost:3001/auth/callback');
+  console.log('3) After granting, you will be redirected to localhost:/auth/callback');
   console.log('4) A page will display your authorization code - copy it from the page.');
   console.log('5) Paste the code below.\n');
 

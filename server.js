@@ -61,6 +61,7 @@ const runMigrations = require('./src/db_migrate');
 
 const PORT = process.env.PORT || 3000;
 
+
 async function start() {
   try {
     // Apply any missing schema/migrations before starting the server
