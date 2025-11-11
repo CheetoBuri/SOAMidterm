@@ -21,3 +21,6 @@ logs/
 # System
 .DS_Store
 Thumbs.db
+
+# Test files
+mailtest.js
