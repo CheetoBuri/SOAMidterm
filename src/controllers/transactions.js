@@ -140,7 +140,18 @@ async function verifyTransactionHandler(req, res) {
 
 async function historyHandler(req, res) {
   try {
-    const [rows] = await pool.query('SELECT t.*, s.student_id AS mssv, s.full_name AS student_name FROM transactions t JOIN students s ON s.id = t.target_student_id WHERE t.payer_user_id = ? ORDER BY t.created_at DESC LIMIT 100', [req.user.id]);
+    const [rows] = await pool.query(`
+      SELECT 
+        t.*, 
+        s.student_id AS mssv, 
+        s.full_name AS student_name 
+      FROM transactions t 
+      JOIN tuitions tu ON tu.id = t.tuition_id
+      JOIN students s ON s.id = tu.student_id 
+      WHERE t.payer_user_id = ? 
+      ORDER BY t.created_at DESC 
+      LIMIT 100
+    `, [req.user.id]);
     res.json({ transactions: rows });
   } catch (err) {
     console.error(err);
@@ -162,6 +173,7 @@ async function resendOtpHandler(req, res) {
 
     // look for existing OTP
     // always issue a new OTP on resend (invalidate previous if any)
+    const [otprows] = await pool.query('SELECT * FROM otps WHERE transaction_id = ?', [transactionId]);
     if (otprows.length > 0) {
       const prev = otprows[0];
       // mark previous OTP used to invalidate it
