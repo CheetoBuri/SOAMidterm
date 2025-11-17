@@ -3,22 +3,58 @@ const { generateOtp, hashOtp, sendOtpEmail, sendConfirmationEmail, OTP_TTL_MIN }
 
 async function startTransactionHandler(req, res) {
   try {
-    const { tuitionId } = req.body;
-    if (!tuitionId) return res.status(400).json({ error: 'missing_tuitionId' });
+    const { studentId, tuitionId } = req.body;
+    const normalizedStudentId = typeof studentId === 'string' ? studentId.trim() : studentId;
+    console.log('[startTransaction] Request:', { studentId: normalizedStudentId, tuitionId, userId: req.user?.id, userBalance: req.user?.balance_cents });
     
-    // Get tuition record with student info
+    if (!normalizedStudentId) {
+      console.log('[startTransaction] Missing studentId');
+      return res.status(400).json({ error: 'missing_studentId' });
+    }
+    if (tuitionId == null || tuitionId === undefined) {
+      console.log('[startTransaction] Missing tuitionId');
+      return res.status(400).json({ error: 'missing_tuitionId' });
+    }
+    // Validate tuitionId is a positive integer
+    const tuitionIdNum = Number(tuitionId);
+    if (!Number.isInteger(tuitionIdNum) || tuitionIdNum <= 0) {
+      console.log('[startTransaction] Invalid tuitionId:', tuitionIdNum);
+      return res.status(400).json({ error: 'invalid_tuitionId', message: 'tuitionId must be a positive integer' });
+    }
+    
+    // Get tuition record with student info, ensuring tuitionId is scoped to the student
     const [trows] = await pool.query(`
-      SELECT t.*, s.full_name, s.student_id
-      FROM tuitions t
-      JOIN students s ON s.id = t.student_id
-      WHERE t.id = ? AND t.status = 'pending'
-    `, [tuitionId]);
+      SELECT * FROM (
+        SELECT 
+          t.*,
+          s.full_name,
+          s.student_id AS mssv,
+          ROW_NUMBER() OVER (
+            PARTITION BY s.id
+            ORDER BY t.academic_year DESC, t.semester DESC, t.id DESC
+          ) AS tuition_public_id
+        FROM tuitions t
+        JOIN students s ON s.id = t.student_id
+        WHERE t.status = 'pending'
+      ) tu
+      WHERE tu.mssv = ? AND tu.tuition_public_id = ?
+    `, [normalizedStudentId, tuitionIdNum]);
     
-    if (trows.length === 0) return res.status(404).json({ error: 'tuition_not_found_or_already_paid' });
+    if (trows.length === 0) {
+      console.log('[startTransaction] Tuition not found for student:', { normalizedStudentId, tuitionIdNum });
+      return res.status(404).json({ error: 'tuition_not_found_for_student', message: `Student ${normalizedStudentId} does not have pending tuition with id ${tuitionIdNum}` });
+    }
     const tuition = trows[0];
+    console.log('[startTransaction] Found tuition:', { student: normalizedStudentId, publicId: tuitionIdNum, amount: tuition.amount_cents, userBalance: req.user.balance_cents });
     
     if (req.user.balance_cents < tuition.amount_cents) {
-      return res.status(400).json({ error: 'insufficient_balance' });
+      console.log('[startTransaction] Insufficient balance:', { required: tuition.amount_cents, available: req.user.balance_cents });
+      return res.status(400).json({ 
+        error: 'insufficient_balance', 
+        message: `Insufficient balance. Required: ${tuition.amount_cents/100} VND, Available: ${req.user.balance_cents/100} VND`,
+        required: tuition.amount_cents,
+        available: req.user.balance_cents
+      });
     }
 
     // create pending transaction
@@ -171,15 +207,6 @@ async function resendOtpHandler(req, res) {
 
     const MAX_ATTEMPTS = Number(process.env.OTP_MAX_ATTEMPTS || 3);
 
-    // look for existing OTP
-    // always issue a new OTP on resend (invalidate previous if any)
-    const [otprows] = await pool.query('SELECT * FROM otps WHERE transaction_id = ?', [transactionId]);
-    if (otprows.length > 0) {
-      const prev = otprows[0];
-      // mark previous OTP used to invalidate it
-      await pool.query('UPDATE otps SET used = 1 WHERE id = ?', [prev.id]);
-    }
-
     // create a new OTP (ensure uniqueness by hash)
     let code;
     let codeHash;
@@ -192,7 +219,15 @@ async function resendOtpHandler(req, res) {
     }
     if (!code) code = (Math.random().toString(36).substring(2, 10)).toUpperCase(), codeHash = hashOtp(code);
     const expiresAtNew = new Date(Date.now() + OTP_TTL_MIN * 60 * 1000);
-    await pool.query('INSERT INTO otps (transaction_id, code_hash, expires_at, attempts) VALUES (?, ?, ?, 0)', [transactionId, codeHash, expiresAtNew]);
+    await pool.query(`
+      INSERT INTO otps (transaction_id, code_hash, expires_at, attempts, used)
+      VALUES (?, ?, ?, 0, 0)
+      ON DUPLICATE KEY UPDATE
+        code_hash = VALUES(code_hash),
+        expires_at = VALUES(expires_at),
+        attempts = 0,
+        used = 0
+    `, [transactionId, codeHash, expiresAtNew]);
     await sendOtpEmail(req.user.email, code);
     return res.json({ transactionId, otpExpiresAt: expiresAtNew });
   } catch (err) {
@@ -201,5 +236,65 @@ async function resendOtpHandler(req, res) {
   }
 }
 
-module.exports = { startTransactionHandler, verifyTransactionHandler, historyHandler, resendOtpHandler };
+async function cancelTransactionHandler(req, res) {
+  let conn;
+  try {
+    const { transactionId } = req.body;
+    if (!transactionId) return res.status(400).json({ error: 'missing_transactionId' });
+
+    conn = await pool.getConnection();
+    await conn.beginTransaction();
+
+    const [rows] = await conn.query('SELECT * FROM transactions WHERE id = ? FOR UPDATE', [transactionId]);
+    if (rows.length === 0) {
+      await conn.rollback();
+      return res.status(404).json({ error: 'transaction_not_found' });
+    }
+    const tx = rows[0];
+    if (tx.payer_user_id !== req.user.id) {
+      await conn.rollback();
+      return res.status(403).json({ error: 'forbidden' });
+    }
+    if (tx.status !== 'pending') {
+      await conn.rollback();
+      return res.status(400).json({ error: 'transaction_not_pending' });
+    }
+
+    await conn.execute('UPDATE transactions SET status = ?, confirmed_at = NULL WHERE id = ?', ['cancelled', transactionId]);
+    await conn.execute('UPDATE otps SET used = 1 WHERE transaction_id = ?', [transactionId]);
+
+    await conn.commit();
+    res.json({ success: true });
+  } catch (err) {
+    console.error(err);
+    if (conn) {
+      try { await conn.rollback(); } catch (e) { /* ignore */ }
+    }
+    res.status(500).json({ error: 'server_error' });
+  } finally {
+    if (conn) conn.release();
+  }
+}
+
+async function deleteTransactionHandler(req, res) {
+  try {
+    const { transactionId } = req.body;
+    if (!transactionId) return res.status(400).json({ error: 'missing_transactionId' });
+    const [rows] = await pool.query('SELECT * FROM transactions WHERE id = ?', [transactionId]);
+    if (rows.length === 0) return res.status(404).json({ error: 'transaction_not_found' });
+    const tx = rows[0];
+    if (tx.payer_user_id !== req.user.id) return res.status(403).json({ error: 'forbidden' });
+    if (tx.status === 'pending') return res.status(400).json({ error: 'transaction_pending_cannot_delete' });
+    if (tx.status === 'confirmed') return res.status(400).json({ error: 'transaction_confirmed_cannot_delete' });
+
+    await pool.query('DELETE FROM otps WHERE transaction_id = ?', [transactionId]);
+    await pool.query('DELETE FROM transactions WHERE id = ?', [transactionId]);
+    res.json({ success: true });
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ error: 'server_error' });
+  }
+}
+
+module.exports = { startTransactionHandler, verifyTransactionHandler, historyHandler, resendOtpHandler, cancelTransactionHandler, deleteTransactionHandler };
 

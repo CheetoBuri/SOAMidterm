@@ -37,7 +37,8 @@
         
         <div id="tuitionList" style="margin-top:16px">
           <h4>Pending Tuitions</h4>
-          <div class="tuition-grid" style="display:grid;grid-template-columns:auto 1fr auto auto;gap:8px;align-items:center;margin-top:8px">
+          <div class="tuition-grid" style="display:grid;grid-template-columns:auto auto 1fr auto auto;gap:8px;align-items:center;margin-top:8px">
+            <div style="font-weight:600">ID</div>
             <div style="font-weight:600">Academic Year</div>
             <div style="font-weight:600">Description</div>
             <div style="font-weight:600">Amount (VND)</div>
@@ -52,6 +53,39 @@
       <div>
         <label><input type="checkbox" id="acceptTerms" /> I accept the terms and conditions</label>
         <button id="confirmBtn" disabled>Confirm and Send OTP</button>
+      </div>
+    </section>
+
+    <section id="historySection">
+      <div style="display:flex;justify-content:space-between;align-items:center">
+        <h2>Transaction History</h2>
+        <button id="refreshHistoryBtn" class="btn" type="button">Refresh</button>
+      </div>
+      <div id="historyContainer">
+        <div id="historyLoading" style="display:none;text-align:center;padding:20px;color:#666">
+          Loading transaction history...
+        </div>
+        <div id="historyError" style="display:none;color:#dc3545;padding:10px"></div>
+        <div id="historyTable" style="display:none">
+        <table style="width:100%;border-collapse:collapse;margin-top:16px">
+          <thead>
+            <tr style="background:#f5f5f5;border-bottom:2px solid #ddd">
+              <th style="padding:12px;text-align:left">ID</th>
+              <th style="padding:12px;text-align:left">Student</th>
+              <th style="padding:12px;text-align:left">MSSV</th>
+              <th style="padding:12px;text-align:right">Amount (VND)</th>
+              <th style="padding:12px;text-align:center">Status</th>
+              <th style="padding:12px;text-align:left">Date</th>
+              <th style="padding:12px;text-align:center">Actions</th>
+            </tr>
+          </thead>
+          <tbody id="historyRows">
+          </tbody>
+        </table>
+        </div>
+        <p id="noHistory" style="display:none;color:#666;font-style:italic;text-align:center;padding:20px">
+          No transaction history found.
+        </p>
       </div>
     </section>
 

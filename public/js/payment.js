@@ -18,8 +18,9 @@ function log(msg, data) {
 }
 
 // State management
-let selectedTuitionId = null;
+let selectedTuitionPublicId = null;
 let selectedTuitionAmount = null;
+let currentStudentMssv = null;
 let otpTimerHandle = null;
 let resendCooldownHandle = null;
 
@@ -50,6 +51,12 @@ window.addEventListener('DOMContentLoaded', () => {
     studentInput.addEventListener('blur', async () => {
       if (studentInput.value.trim()) await doLookup();
     });
+    studentInput.addEventListener('input', () => {
+      currentStudentMssv = null;
+      selectedTuitionPublicId = null;
+      selectedTuitionAmount = null;
+      validateForm();
+    });
   }
 
   // Event listeners
@@ -59,6 +66,15 @@ window.addEventListener('DOMContentLoaded', () => {
   $('otpForm').addEventListener('submit', verifyTransaction);
   $('resendBtn')?.addEventListener('click', resendOTP);
   $('logoutBtn').addEventListener('click', logout);
+  $('refreshHistoryBtn')?.addEventListener('click', async () => {
+    await loadHistory();
+    const token = localStorage.getItem('token');
+    if (token) await updateProfile(token);
+  });
+  document.addEventListener('click', onHistoryActionClick);
+
+  // Load transaction history on page load
+  loadHistory();
 });
 
 /**
@@ -82,6 +98,10 @@ async function doLookup() {
   log('Fetching student:', studentId);
   $('lookupBtn').disabled = true;
   clearPaymentForm();
+  $('studentId').value = studentId;
+  currentStudentMssv = null;
+  selectedTuitionPublicId = null;
+  selectedTuitionAmount = null;
   
   try {
     const resp = await api.getStudent(token, studentId);
@@ -96,6 +116,7 @@ async function doLookup() {
     } else {
       log('Found student:', resp.student);
       $('studentName').value = resp.student.full_name;
+      currentStudentMssv = studentId;
       
       // Display tuition list
       const tuitions = resp.student.pending_tuitions || [];
@@ -106,6 +127,7 @@ async function doLookup() {
         $('noTuitions').style.display = 'none';
         $('tuitionRows').innerHTML = tuitions.map(t => `
           <div class="tuition-row">
+            <div style="font-weight:600;color:#0b74de">#${t.id}</div>
             <div>${t.academic_year} (Semester ${t.semester})</div>
             <div>${t.description || 'Tuition Payment'}</div>
             <div style="text-align:right">${(t.amount_cents/100).toFixed(2)}</div>
@@ -114,6 +136,7 @@ async function doLookup() {
                 onclick="window.selectTuition(${t.id},${t.amount_cents})" 
                 class="select-tuition-btn btn ${canPayTuition(t.amount_cents) ? 'btn-primary' : ''}"
                 ${canPayTuition(t.amount_cents) ? '' : 'disabled'}
+                title="Tuition ID: ${t.id}"
               >
                 Select
               </button>
@@ -147,7 +170,7 @@ function canPayTuition(amountCents) {
  */
 window.selectTuition = function(tuitionId, amountCents) {
   log('Selecting tuition:', { tuitionId, amountCents });
-  selectedTuitionId = tuitionId;
+  selectedTuitionPublicId = tuitionId;
   selectedTuitionAmount = amountCents;
   
   // Update UI
@@ -169,7 +192,7 @@ function validateForm() {
   const profile = JSON.parse(localStorage.getItem('profile') || '{}');
   const payer_balance = profile.balance_cents || 0;
   
-  const can = selectedTuitionId != null && // tuition selected
+  const can = selectedTuitionPublicId != null && // tuition selected
             selectedTuitionAmount > 0 && // valid amount
             payer_balance >= selectedTuitionAmount && // has enough balance
             $('studentName').value && // has student name (valid lookup)
@@ -190,7 +213,12 @@ function validateForm() {
  */
 async function startTransaction() {
   const token = localStorage.getItem('token');
-  if (!selectedTuitionId) {
+  const studentId = currentStudentMssv;
+  if (!studentId) {
+    alert('Please lookup a student before starting a transaction');
+    return;
+  }
+  if (!selectedTuitionPublicId) {
     alert('Please select a tuition to pay');
     return;
   }
@@ -201,12 +229,15 @@ async function startTransaction() {
   verifyBtn.innerText = 'Processing...';
   
   try {
-    log('Starting transaction for tuition:', selectedTuitionId);
-    const resp = await api.startTx(token, selectedTuitionId);
+    log('Starting transaction for tuition:', { studentId, tuition: selectedTuitionPublicId });
+    const resp = await api.startTx(token, studentId, selectedTuitionPublicId);
     if (resp.error) {
       log('Transaction start error:', resp.error);
       if (resp.error === 'tuition_not_found_or_already_paid') {
         alert('This tuition has already been paid or is no longer available');
+        await doLookup();
+      } else if (resp.error === 'tuition_not_found_for_student') {
+        alert('Selected tuition no longer belongs to this student. Please lookup again.');
         await doLookup();
       } else {
         alert(resp.error);
@@ -255,6 +286,8 @@ async function verifyTransaction(e) {
     $('otpModal').style.display = 'none';
     await updateProfile(token, resp.new_balance_cents);
     clearPaymentForm();
+    // Refresh transaction history after successful payment
+    await loadHistory();
   } catch (e) {
     log('Network error during verification:', e);
     $('otpError').innerText = 'Network error — please try again.';
@@ -299,22 +332,24 @@ function handleVerificationError(error) {
  * @param {number|null} new_balance_cents - New balance from API
  */
 async function updateProfile(token, new_balance_cents) {
-  if (new_balance_cents != null) {
-    try {
-      log('Refreshing profile...');
-      const profResp = await api.profile(token);
-      if (!profResp.error && profResp.profile) {
-        localStorage.setItem('profile', JSON.stringify(profResp.profile));
-      } else {
-        // fallback: update stored balance
-        const p = JSON.parse(localStorage.getItem('profile') || '{}');
-        p.balance_cents = new_balance_cents;
-        localStorage.setItem('profile', JSON.stringify(p));
-      }
-    } catch (e) {
-      log('Error refreshing profile:', e);
+  let updated = false;
+  try {
+    log('Refreshing profile...');
+    const profResp = await api.profile(token);
+    if (!profResp.error && profResp.profile) {
+      localStorage.setItem('profile', JSON.stringify(profResp.profile));
+      updated = true;
     }
+  } catch (e) {
+    log('Error refreshing profile:', e);
   }
+
+  if (!updated && new_balance_cents != null) {
+    const p = JSON.parse(localStorage.getItem('profile') || '{}');
+    p.balance_cents = new_balance_cents;
+    localStorage.setItem('profile', JSON.stringify(p));
+  }
+
   populatePayer();
 }
 
@@ -431,8 +466,180 @@ function clearPaymentForm() {
   $('noTuitions').style.display = 'none';
   $('acceptTerms').checked = false;
   $('confirmBtn').disabled = true;
-  selectedTuitionId = null;
+  selectedTuitionPublicId = null;
   selectedTuitionAmount = null;
+  currentStudentMssv = null;
+}
+
+/**
+ * Load and display transaction history
+ */
+async function loadHistory() {
+  const token = localStorage.getItem('token');
+  if (!token) {
+    log('No token found, cannot load history');
+    return;
+  }
+
+  const loadingEl = $('historyLoading');
+  const errorEl = $('historyError');
+  const tableEl = $('historyTable');
+  const noHistoryEl = $('noHistory');
+  const rowsEl = $('historyRows');
+
+  // Show loading state
+  loadingEl.style.display = 'block';
+  errorEl.style.display = 'none';
+  tableEl.style.display = 'none';
+  noHistoryEl.style.display = 'none';
+
+  try {
+    log('Loading transaction history...');
+    const resp = await api.history(token);
+    
+    if (resp.error) {
+      log('History error:', resp.error);
+      errorEl.textContent = `Error loading history: ${resp.error}`;
+      errorEl.style.display = 'block';
+      loadingEl.style.display = 'none';
+      return;
+    }
+
+    const transactions = resp.transactions || [];
+    log('Loaded transactions:', transactions.length);
+
+    loadingEl.style.display = 'none';
+
+    if (transactions.length === 0) {
+      noHistoryEl.style.display = 'block';
+      return;
+    }
+
+    // Display transactions
+    rowsEl.innerHTML = transactions.map(tx => {
+      const statusClass = `status-${tx.status}`;
+      const statusText = tx.status.charAt(0).toUpperCase() + tx.status.slice(1);
+      const amount = (tx.amount_cents / 100).toFixed(2);
+      const date = new Date(tx.created_at).toLocaleString('vi-VN', {
+        year: 'numeric',
+        month: '2-digit',
+        day: '2-digit',
+        hour: '2-digit',
+        minute: '2-digit'
+      });
+      const confirmedDate = tx.confirmed_at 
+        ? new Date(tx.confirmed_at).toLocaleString('vi-VN', {
+            year: 'numeric',
+            month: '2-digit',
+            day: '2-digit',
+            hour: '2-digit',
+            minute: '2-digit'
+          })
+        : '-';
+    const actionButtons = [];
+    if (tx.status === 'pending') {
+      actionButtons.push(`<button type="button" class="btn btn-danger cancel-tx-btn" data-tx-id="${tx.id}">Cancel</button>`);
+    }
+    if (tx.status === 'failed' || tx.status === 'cancelled') {
+      actionButtons.push(`<button type="button" class="btn btn-secondary delete-tx-btn" data-tx-id="${tx.id}">Delete</button>`);
+    }
+    const actionHtml = actionButtons.length
+      ? `<div class="history-actions">${actionButtons.join(' ')}</div>`
+      : '-';
+
+      return `
+        <tr>
+          <td>#${tx.id}</td>
+          <td>${tx.student_name || 'N/A'}</td>
+          <td>${tx.mssv || 'N/A'}</td>
+          <td style="text-align:right">${amount}</td>
+          <td style="text-align:center">
+            <span class="status-badge ${statusClass}">${statusText}</span>
+          </td>
+          <td>
+            <div>Created: ${date}</div>
+            ${tx.confirmed_at ? `<div style="font-size:0.85em;color:#666">Confirmed: ${confirmedDate}</div>` : ''}
+          </td>
+          <td style="text-align:center">${actionHtml}</td>
+        </tr>
+      `;
+    }).join('');
+
+    tableEl.style.display = 'block';
+  } catch (e) {
+    log('Network error loading history:', e);
+    errorEl.textContent = 'Network error loading transaction history. Please try again.';
+    errorEl.style.display = 'block';
+    loadingEl.style.display = 'none';
+  }
+}
+
+async function cancelTransaction(transactionId) {
+  const token = localStorage.getItem('token');
+  if (!token) {
+    alert('Session expired. Please login again.');
+    window.location.href = 'login.html';
+    return;
+  }
+  const confirmCancel = confirm('Cancel this pending transaction?');
+  if (!confirmCancel) return;
+
+  try {
+    const resp = await api.cancelTx(token, transactionId);
+    if (resp.error) {
+      alert(resp.error);
+      return;
+    }
+    alert('Transaction cancelled.');
+    await loadHistory();
+    await updateProfile(token);
+  } catch (e) {
+    log('Network error cancelling transaction:', e);
+    alert('Network error cancelling transaction.');
+  }
+}
+
+async function deleteTransaction(transactionId) {
+  const token = localStorage.getItem('token');
+  if (!token) {
+    alert('Session expired. Please login again.');
+    window.location.href = 'login.html';
+    return;
+  }
+  const confirmDelete = confirm('Delete this transaction from history?');
+  if (!confirmDelete) return;
+
+  try {
+    const resp = await api.deleteTx(token, transactionId);
+    if (resp.error) {
+      alert(resp.error);
+      return;
+    }
+    alert('Transaction deleted.');
+    await loadHistory();
+  } catch (e) {
+    log('Network error deleting transaction:', e);
+    alert('Network error deleting transaction.');
+  }
+}
+
+function onHistoryActionClick(event) {
+  const target = event.target instanceof Element ? event.target : event.target?.parentElement;
+  if (!target) return;
+
+  const btn = target.closest('.cancel-tx-btn');
+  if (btn) {
+    const txId = Number(btn.dataset.txId);
+    if (!Number.isFinite(txId)) return;
+    cancelTransaction(txId);
+    return;
+  }
+  const deleteBtn = target.closest('.delete-tx-btn');
+  if (deleteBtn) {
+    const txId = Number(deleteBtn.dataset.txId);
+    if (!Number.isFinite(txId)) return;
+    deleteTransaction(txId);
+  }
 }
 
 /**

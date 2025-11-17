@@ -47,7 +47,7 @@ label {
 /* Tuition list styles */
 .tuition-grid {
   display: grid;
-  grid-template-columns: auto 1fr auto auto;
+  grid-template-columns: auto auto 1fr auto auto;
   gap: 8px;
   align-items: center;
   margin-top: 8px;
@@ -55,7 +55,7 @@ label {
 
 .tuition-row {
   display: grid;
-  grid-template-columns: auto 1fr auto auto;
+  grid-template-columns: auto auto 1fr auto auto;
   gap: 8px;
   align-items: center;
   padding: 8px 0;
@@ -83,6 +83,22 @@ label {
 .btn-success {
   background: #4CAF50;
   color: white;
+}
+
+.btn-danger {
+  background: #dc3545;
+  color: white;
+}
+
+.btn-secondary {
+  background: #6c757d;
+  color: white;
+}
+
+.history-actions {
+  display: flex;
+  gap: 8px;
+  justify-content: center;
 }
 
 /* Form styling */
@@ -117,4 +133,66 @@ label {
 
 .error-text {
   color: #dc3545;
+}
+
+/* Transaction History styles */
+#historySection {
+  margin-top: 32px;
+  padding-top: 32px;
+  border-top: 2px solid #eee;
+}
+
+#historyTable table {
+  width: 100%;
+  border-collapse: collapse;
+  margin-top: 16px;
+}
+
+#historyTable thead tr {
+  background: #f5f5f5;
+  border-bottom: 2px solid #ddd;
+}
+
+#historyTable th {
+  padding: 12px;
+  text-align: left;
+  font-weight: 600;
+}
+
+#historyTable td {
+  padding: 12px;
+  border-bottom: 1px solid #eee;
+}
+
+#historyTable tbody tr:hover {
+  background: #f9f9f9;
+}
+
+.status-badge {
+  display: inline-block;
+  padding: 4px 12px;
+  border-radius: 12px;
+  font-size: 0.85em;
+  font-weight: 600;
+  text-transform: uppercase;
+}
+
+.status-pending {
+  background: #fff3cd;
+  color: #856404;
+}
+
+.status-confirmed {
+  background: #d4edda;
+  color: #155724;
+}
+
+.status-failed {
+  background: #f8d7da;
+  color: #721c24;
+}
+
+.status-cancelled {
+  background: #e2e3e5;
+  color: #383d41;
 }
