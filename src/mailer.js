@@ -11,11 +11,18 @@ const SMTP_PORT = process.env.SMTP_PORT ? Number(process.env.SMTP_PORT) : undefi
 const SMTP_SECURE = process.env.SMTP_SECURE === 'true'; // true for 465
 const SMTP_USER = process.env.SMTP_USER || undefined;
 const SMTP_PASS = process.env.SMTP_PASS || undefined;
+// Secondary SMTP account for bob (hnh.tien@gmail.com)
+const SMTP_USER_BOB = process.env.SMTP_USER_BOB || undefined;
+const SMTP_PASS_BOB = process.env.SMTP_PASS_BOB || undefined;
 const SMTP_FROM = process.env.SMTP_FROM || 'no-reply@ibank.local';
 
+// Create transporter for alice (default)
 let transporter;
+// Create transporter for bob (if configured)
+let transporterBob = null;
+
 if (SMTP_HOST) {
-  // Real SMTP transport
+  // Real SMTP transport for alice
   const opts = {
     host: SMTP_HOST,
     port: SMTP_PORT || 587,
@@ -32,13 +39,40 @@ if (SMTP_HOST) {
   transporter = nodemailer.createTransport(opts);
   // verify transporter on startup (non-blocking)
   transporter.verify().then(() => {
-    console.log('SMTP transporter ready');
+    console.log('SMTP transporter ready (alice)');
   }).catch((err) => {
     console.warn('SMTP transporter verification failed:', err && err.message ? err.message : err);
   });
+
+  // Create transporter for bob if configured
+  if (SMTP_USER_BOB && SMTP_PASS_BOB) {
+    const optsBob = {
+      host: SMTP_HOST,
+      port: SMTP_PORT || 587,
+      secure: SMTP_SECURE || false,
+      auth: { user: SMTP_USER_BOB, pass: SMTP_PASS_BOB }
+    };
+    if (process.env.SMTP_TLS_REJECT === 'false') {
+      optsBob.tls = { rejectUnauthorized: false };
+    }
+    transporterBob = nodemailer.createTransport(optsBob);
+    transporterBob.verify().then(() => {
+      console.log('SMTP transporter ready (bob)');
+    }).catch((err) => {
+      console.warn('SMTP transporter verification failed (bob):', err && err.message ? err.message : err);
+    });
+  }
 } else {
   // JSON transport for prototype/testing (prints to logs)
   transporter = nodemailer.createTransport({ jsonTransport: true });
+}
+
+// Helper function to get the right transporter based on recipient email
+function getTransporterForEmail(email) {
+  if (email && email.includes('hnh.tien@gmail.com') && transporterBob) {
+    return transporterBob;
+  }
+  return transporter;
 }
 
 function generateOtp() {
@@ -50,16 +84,21 @@ function hashOtp(code) {
 }
 
 async function sendOtpEmail(to, code) {
+  const mailTransporter = getTransporterForEmail(to);
+  const fromEmail = (to && to.includes('hnh.tien@gmail.com') && SMTP_USER_BOB) 
+    ? SMTP_USER_BOB 
+    : (SMTP_USER || SMTP_FROM);
+  
   const mail = {
-    from: SMTP_FROM,
+    from: fromEmail,
     to,
     subject: 'Your iBank OTP',
     text: `Your OTP code is ${code} (valid ${OTP_TTL_MIN} minutes).`
   };
   try {
-    const info = await transporter.sendMail(mail);
+    const info = await mailTransporter.sendMail(mail);
     if (SMTP_HOST) {
-      console.log('OTP mail sent via SMTP to', to, 'messageId=', info && info.messageId);
+      console.log('OTP mail sent via SMTP to', to, 'from', fromEmail, 'messageId=', info && info.messageId);
     } else {
       console.log('OTP mail (mock):', info);
     }
@@ -70,16 +109,21 @@ async function sendOtpEmail(to, code) {
 }
 
 async function sendConfirmationEmail(to, details) {
+  const mailTransporter = getTransporterForEmail(to);
+  const fromEmail = (to && to.includes('hnh.tien@gmail.com') && SMTP_USER_BOB) 
+    ? SMTP_USER_BOB 
+    : (SMTP_USER || SMTP_FROM);
+  
   const mail = {
-    from: SMTP_FROM,
+    from: fromEmail,
     to,
     subject: 'Payment confirmation',
     text: `Your payment was successful: ${details}`
   };
   try {
-    const info = await transporter.sendMail(mail);
+    const info = await mailTransporter.sendMail(mail);
     if (SMTP_HOST) {
-      console.log('Confirmation mail sent via SMTP to', to, 'messageId=', info && info.messageId);
+      console.log('Confirmation mail sent via SMTP to', to, 'from', fromEmail, 'messageId=', info && info.messageId);
     } else {
       console.log('Confirmation mail (mock):', info);
     }

@@ -66,7 +66,7 @@ CREATE TABLE IF NOT EXISTS otps (
 INSERT IGNORE INTO users (username, password, full_name, phone, email, balance_cents)
 VALUES
 ('alice','alice123','Alice Nguyen','+84900123456','huynhnhattien0411@gmail.com',100000),
-('bob','bob123','Bob Tran','+84900987654','bob@example.com',50000);
+('bob','bob123','Bob Tran','+84900987654','hnh.tien@gmail.com',50000);
 
 -- Seed demo students
 INSERT IGNORE INTO students (student_id, full_name)
