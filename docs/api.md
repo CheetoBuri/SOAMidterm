@@ -45,12 +45,21 @@ Get student information and pending tuitions.
         "academic_year": "number",
         "semester": "number",
         "amount_cents": "number",
-        "description": "string"
+        "description": "string",
+        "read_only": "boolean (optional)",
+        "is_combined": "boolean (optional)",
+        "mandatory": "boolean (optional)",
+        "tuition_count": "number (optional)"
       }
     ]
   }
 }
 ```
+
+**Special behavior for student 20190001:**
+- If the student has multiple pending tuitions, individual tuitions are listed first with `read_only: true` (for information only)
+- A combined payment option with `id: 0`, `is_combined: true`, and `mandatory: true` is included at the end
+- Individual tuitions cannot be paid separately - only the combined option (id=0) can be used for payment
 
 ## Transactions
 
@@ -60,9 +69,16 @@ Start a new payment transaction.
 **Request:**
 ```json
 {
+  "studentId": "string",
   "tuitionId": "number"
 }
 ```
+
+**Special rules for student 20190001 with multiple pending tuitions:**
+- Individual tuition IDs (1, 2, etc.) are **NOT accepted** - they are read-only for information only
+- **MUST use `tuitionId: 0`** to pay all tuitions combined in a single transaction
+- This is **mandatory** - individual tuitions cannot be paid separately
+- The combined payment will process all pending tuitions together
 
 **Response:**
 ```json

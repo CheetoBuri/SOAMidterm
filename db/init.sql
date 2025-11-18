@@ -46,8 +46,10 @@ CREATE TABLE IF NOT EXISTS transactions (
   status ENUM('pending','confirmed','failed','cancelled') NOT NULL DEFAULT 'pending',
   created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
   confirmed_at TIMESTAMP NULL,
+  transaction_group_id INT NULL,
   FOREIGN KEY (payer_user_id) REFERENCES users(id),
-  FOREIGN KEY (tuition_id) REFERENCES tuitions(id)
+  FOREIGN KEY (tuition_id) REFERENCES tuitions(id),
+  INDEX idx_transaction_group_id (transaction_group_id)
 ) ENGINE=InnoDB;
 
 -- OTPs table
@@ -65,7 +67,7 @@ CREATE TABLE IF NOT EXISTS otps (
 -- Seed demo users
 INSERT IGNORE INTO users (username, password, full_name, phone, email, balance_cents)
 VALUES
-('alice','alice123','Alice Nguyen','+84900123456','huynhnhattien0411@gmail.com',100000),
+('alice','alice123','Alice Nguyen','+84900123456','huynhnhattien0411@gmail.com',150000),
 ('bob','bob123','Bob Tran','+84900987654','hnh.tien@gmail.com',50000);
 
 -- Seed demo students

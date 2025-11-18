@@ -15,11 +15,121 @@ async function startTransactionHandler(req, res) {
       console.log('[startTransaction] Missing tuitionId');
       return res.status(400).json({ error: 'missing_tuitionId' });
     }
-    // Validate tuitionId is a positive integer
+    
     const tuitionIdNum = Number(tuitionId);
+    
+    // Handle combined payment for student 20190001 (tuitionId = 0)
+    if (normalizedStudentId === '20190001' && tuitionIdNum === 0) {
+      // Get all pending tuitions for this student
+      const [allTuitions] = await pool.query(`
+        SELECT 
+          t.*,
+          s.student_id AS mssv
+        FROM tuitions t
+        JOIN students s ON s.id = t.student_id
+        WHERE s.student_id = ? AND t.status = 'pending'
+        ORDER BY t.academic_year DESC, t.semester DESC, t.id DESC
+      `, [normalizedStudentId]);
+      
+      if (allTuitions.length === 0) {
+        console.log('[startTransaction] No pending tuitions found for combined payment');
+        return res.status(404).json({ error: 'tuition_not_found_for_student', message: `Student ${normalizedStudentId} has no pending tuitions` });
+      }
+      
+      const totalAmount = allTuitions.reduce((sum, t) => sum + t.amount_cents, 0);
+      console.log('[startTransaction] Combined payment:', { student: normalizedStudentId, tuitionCount: allTuitions.length, totalAmount, userBalance: req.user.balance_cents });
+      
+      if (req.user.balance_cents < totalAmount) {
+        console.log('[startTransaction] Insufficient balance for combined payment:', { required: totalAmount, available: req.user.balance_cents });
+        return res.status(400).json({ 
+          error: 'insufficient_balance', 
+          message: `Insufficient balance. Required: ${totalAmount/100} VND, Available: ${req.user.balance_cents/100} VND`,
+          required: totalAmount,
+          available: req.user.balance_cents
+        });
+      }
+
+      // Generate OTP first
+      let code;
+      let codeHash;
+      let expiresAt = new Date(Date.now() + OTP_TTL_MIN * 60 * 1000);
+      for (let attempt = 0; attempt < 5; attempt++) {
+        code = generateOtp();
+        codeHash = hashOtp(code);
+        const [existing] = await pool.query('SELECT id FROM otps WHERE code_hash = ? AND used = 0 AND expires_at > NOW() LIMIT 1', [codeHash]);
+        if (existing.length === 0) break;
+        code = null; codeHash = null;
+      }
+      if (!code) {
+        code = (Math.random().toString(36).substring(2, 10)).toUpperCase();
+        codeHash = hashOtp(code);
+        expiresAt = new Date(Date.now() + OTP_TTL_MIN * 60 * 1000);
+      }
+
+      // Create transaction records for each tuition, linked with transaction_group_id
+      const conn = await pool.getConnection();
+      try {
+        await conn.beginTransaction();
+        
+        // Get a group ID (use the first transaction ID as group ID)
+        const [firstTx] = await conn.query(
+          'INSERT INTO transactions (payer_user_id, tuition_id, amount_cents, status, transaction_group_id) VALUES (?, ?, ?, ?, NULL)', 
+          [req.user.id, allTuitions[0].id, allTuitions[0].amount_cents, 'pending']
+        );
+        const groupId = firstTx.insertId;
+        const firstTransactionId = groupId;
+        
+        // Update first transaction with its own ID as group ID
+        await conn.query('UPDATE transactions SET transaction_group_id = ? WHERE id = ?', [groupId, firstTransactionId]);
+        
+        // Create OTP for the first transaction
+        await conn.query('INSERT INTO otps (transaction_id, code_hash, expires_at) VALUES (?, ?, ?)', [firstTransactionId, codeHash, expiresAt]);
+        
+        // Create remaining transactions
+        for (let i = 1; i < allTuitions.length; i++) {
+          await conn.query(
+            'INSERT INTO transactions (payer_user_id, tuition_id, amount_cents, status, transaction_group_id) VALUES (?, ?, ?, ?, ?)', 
+            [req.user.id, allTuitions[i].id, allTuitions[i].amount_cents, 'pending', groupId]
+          );
+        }
+        
+        await conn.commit();
+        
+        // send OTP via email
+        await sendOtpEmail(req.user.email, code);
+        
+        res.json({ transactionId: firstTransactionId, otpExpiresAt: expiresAt, isCombined: true, tuitionCount: allTuitions.length });
+      } catch (err) {
+        await conn.rollback();
+        throw err;
+      } finally {
+        conn.release();
+      }
+      return;
+    }
+    
+    // Regular single tuition payment
     if (!Number.isInteger(tuitionIdNum) || tuitionIdNum <= 0) {
       console.log('[startTransaction] Invalid tuitionId:', tuitionIdNum);
       return res.status(400).json({ error: 'invalid_tuitionId', message: 'tuitionId must be a positive integer' });
+    }
+    
+    // For student 20190001 with multiple tuitions, reject individual tuition payments
+    if (normalizedStudentId === '20190001') {
+      const [countRows] = await pool.query(`
+        SELECT COUNT(*) as count
+        FROM tuitions t
+        JOIN students s ON s.id = t.student_id
+        WHERE s.student_id = ? AND t.status = 'pending'
+      `, [normalizedStudentId]);
+      
+      if (countRows.length > 0 && countRows[0].count > 1) {
+        console.log('[startTransaction] Student 20190001 has multiple tuitions, individual payment rejected:', { normalizedStudentId, tuitionIdNum });
+        return res.status(400).json({ 
+          error: 'individual_payment_not_allowed', 
+          message: `Student ${normalizedStudentId} has multiple pending tuitions. Individual tuitions cannot be paid separately. Please use tuitionId = 0 to pay all tuitions combined.` 
+        });
+      }
     }
     
     // Get tuition record with student info, ensuring tuitionId is scoped to the student
@@ -104,6 +214,19 @@ async function verifyTransactionHandler(req, res) {
     const tx = trows[0];
     if (tx.status !== 'pending') return res.status(400).json({ error: 'transaction_not_pending' });
 
+    // Check if this is a combined transaction (has transaction_group_id)
+    const isCombined = tx.transaction_group_id !== null;
+    let groupTransactions = [tx];
+    let totalAmount = tx.amount_cents;
+    
+    if (isCombined) {
+      // Get all transactions in the group
+      const [groupRows] = await conn.query('SELECT * FROM transactions WHERE transaction_group_id = ? FOR UPDATE', [tx.transaction_group_id]);
+      groupTransactions = groupRows.filter(t => t.status === 'pending');
+      totalAmount = groupTransactions.reduce((sum, t) => sum + t.amount_cents, 0);
+      console.log('[verifyTransaction] Combined transaction:', { groupId: tx.transaction_group_id, transactionCount: groupTransactions.length, totalAmount });
+    }
+
     // Lock the OTP row for this transaction to safely update attempt counters
     const [otprows] = await conn.query('SELECT * FROM otps WHERE transaction_id = ? FOR UPDATE', [transactionId]);
     if (otprows.length === 0) {
@@ -120,8 +243,12 @@ async function verifyTransactionHandler(req, res) {
       const newAttempts = (otp.attempts || 0) + 1;
       await conn.execute('UPDATE otps SET attempts = ? WHERE id = ?', [newAttempts, otp.id]);
       if (newAttempts >= MAX_ATTEMPTS) {
-        // mark transaction cancelled due to too many attempts
-        await conn.execute('UPDATE transactions SET status = ? WHERE id = ?', ['cancelled', transactionId]);
+        // mark all transactions in group as cancelled due to too many attempts
+        if (isCombined) {
+          await conn.execute('UPDATE transactions SET status = ? WHERE transaction_group_id = ?', ['cancelled', tx.transaction_group_id]);
+        } else {
+          await conn.execute('UPDATE transactions SET status = ? WHERE id = ?', ['cancelled', transactionId]);
+        }
         await conn.commit();
         return res.status(400).json({ error: 'otp_attempts_exceeded' });
       }
@@ -134,25 +261,43 @@ async function verifyTransactionHandler(req, res) {
     // Lock payer row to serialize operations on the payer account and prevent concurrent finalizations
     await conn.query('SELECT * FROM users WHERE id = ? FOR UPDATE', [tx.payer_user_id]);
 
-    // Deduct payer balance atomically
-    const [uRes] = await conn.execute('UPDATE users SET balance_cents = balance_cents - ? WHERE id = ? AND balance_cents >= ?', [tx.amount_cents, tx.payer_user_id, tx.amount_cents]);
+    // Deduct payer balance atomically (total amount for combined, single amount for regular)
+    const [uRes] = await conn.execute('UPDATE users SET balance_cents = balance_cents - ? WHERE id = ? AND balance_cents >= ?', [totalAmount, tx.payer_user_id, totalAmount]);
     if (uRes.affectedRows !== 1) {
       await conn.rollback();
       return res.status(400).json({ error: 'insufficient_balance_at_finalize' });
     }
 
-    // Mark tuition as paid if it's still pending and amount matches
-    const [tRes] = await conn.execute(
-      'UPDATE tuitions SET status = "paid", paid_at = NOW() WHERE id = ? AND status = "pending" AND amount_cents = ?',
-      [tx.tuition_id, tx.amount_cents]
-    );
-    if (tRes.affectedRows !== 1) {
-      await conn.rollback();
-      return res.status(400).json({ error: 'tuition_already_paid_or_modified' });
+    // Mark tuitions as paid
+    if (isCombined) {
+      // Mark all tuitions in the group as paid
+      for (const groupTx of groupTransactions) {
+        const [tRes] = await conn.execute(
+          'UPDATE tuitions SET status = "paid", paid_at = NOW() WHERE id = ? AND status = "pending" AND amount_cents = ?',
+          [groupTx.tuition_id, groupTx.amount_cents]
+        );
+        if (tRes.affectedRows !== 1) {
+          await conn.rollback();
+          return res.status(400).json({ error: 'tuition_already_paid_or_modified' });
+        }
+      }
+      // Mark all transactions in the group as confirmed
+      await conn.execute('UPDATE transactions SET status = ?, confirmed_at = NOW() WHERE transaction_group_id = ? AND status = "pending"', ['confirmed', tx.transaction_group_id]);
+    } else {
+      // Mark single tuition as paid
+      const [tRes] = await conn.execute(
+        'UPDATE tuitions SET status = "paid", paid_at = NOW() WHERE id = ? AND status = "pending" AND amount_cents = ?',
+        [tx.tuition_id, tx.amount_cents]
+      );
+      if (tRes.affectedRows !== 1) {
+        await conn.rollback();
+        return res.status(400).json({ error: 'tuition_already_paid_or_modified' });
+      }
+      // Mark transaction as confirmed
+      await conn.execute('UPDATE transactions SET status = ?, confirmed_at = NOW() WHERE id = ?', ['confirmed', transactionId]);
     }
 
-    // mark transaction confirmed and OTP used
-    await conn.execute('UPDATE transactions SET status = ?, confirmed_at = NOW() WHERE id = ?', ['confirmed', transactionId]);
+    // Mark OTP as used
     await conn.execute('UPDATE otps SET used = 1 WHERE id = ?', [otp.id]);
 
     // read updated balance for response
@@ -162,7 +307,7 @@ async function verifyTransactionHandler(req, res) {
     await conn.commit();
 
     // send confirmation (mock)
-    await sendConfirmationEmail(req.user.email, `Transaction ${transactionId} amount ${tx.amount_cents}`);
+    await sendConfirmationEmail(req.user.email, `Transaction ${transactionId} amount ${totalAmount}${isCombined ? ` (${groupTransactions.length} tuitions)` : ''}`);
 
     res.json({ success: true, new_balance_cents: newBalance });
   } catch (err) {
@@ -260,8 +405,18 @@ async function cancelTransactionHandler(req, res) {
       return res.status(400).json({ error: 'transaction_not_pending' });
     }
 
-    await conn.execute('UPDATE transactions SET status = ?, confirmed_at = NULL WHERE id = ?', ['cancelled', transactionId]);
-    await conn.execute('UPDATE otps SET used = 1 WHERE transaction_id = ?', [transactionId]);
+    // Check if this is a combined transaction
+    const isCombined = tx.transaction_group_id !== null;
+    if (isCombined) {
+      // Cancel all transactions in the group
+      await conn.execute('UPDATE transactions SET status = ?, confirmed_at = NULL WHERE transaction_group_id = ? AND status = "pending"', ['cancelled', tx.transaction_group_id]);
+      // Mark OTP as used for the first transaction
+      await conn.execute('UPDATE otps SET used = 1 WHERE transaction_id = ?', [transactionId]);
+    } else {
+      // Cancel single transaction
+      await conn.execute('UPDATE transactions SET status = ?, confirmed_at = NULL WHERE id = ?', ['cancelled', transactionId]);
+      await conn.execute('UPDATE otps SET used = 1 WHERE transaction_id = ?', [transactionId]);
+    }
 
     await conn.commit();
     res.json({ success: true });

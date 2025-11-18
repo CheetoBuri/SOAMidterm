@@ -125,24 +125,81 @@ async function doLookup() {
         $('tuitionRows').innerHTML = '';
       } else {
         $('noTuitions').style.display = 'none';
-        $('tuitionRows').innerHTML = tuitions.map(t => `
-          <div class="tuition-row">
-            <div style="font-weight:600;color:#0b74de">#${t.id}</div>
-            <div>${t.academic_year} (Semester ${t.semester})</div>
-            <div>${t.description || 'Tuition Payment'}</div>
-            <div style="text-align:right">${(t.amount_cents/100).toFixed(2)}</div>
-            <div>
-              <button 
-                onclick="window.selectTuition(${t.id},${t.amount_cents})" 
-                class="select-tuition-btn btn ${canPayTuition(t.amount_cents) ? 'btn-primary' : ''}"
-                ${canPayTuition(t.amount_cents) ? '' : 'disabled'}
-                title="Tuition ID: ${t.id}"
-              >
-                Select
-              </button>
+        // Check if this is student 20190001 with mandatory combined payment
+        const hasMandatoryCombined = tuitions.some(t => t.mandatory === true);
+        const individualTuitions = tuitions.filter(t => !t.is_combined && !t.mandatory);
+        const combinedOption = tuitions.find(t => t.is_combined && t.mandatory);
+        
+        let html = '';
+        
+        // Display individual tuitions (read-only, no select button) for student 20190001
+        if (hasMandatoryCombined && individualTuitions.length > 0) {
+          // Show individual tuitions as a list (read-only)
+          html += individualTuitions.map(t => `
+            <div class="tuition-row">
+              <div style="font-weight:600;color:#0b74de">#${t.id}</div>
+              <div>${t.academic_year || ''} ${t.academic_year ? `(Semester ${t.semester})` : ''}</div>
+              <div>${t.description || 'Tuition Payment'}</div>
+              <div style="text-align:right">${(t.amount_cents/100).toFixed(2)}</div>
+              <div></div>
             </div>
-          </div>
-        `).join('');
+          `).join('');
+          
+          // Display separate Pay All button section
+          if (combinedOption) {
+            const totalAmount = combinedOption.amount_cents;
+            html += `
+              <div style="margin-top:20px;padding:15px;background-color:#f8f9fa;border:1px solid #dee2e6;border-radius:4px;">
+                <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:10px;">
+                  <div>
+                    <div style="font-weight:bold;font-size:1.1em;margin-bottom:5px;">Total Amount to Pay</div>
+                    <div style="color:#666;font-size:0.9em;">All ${combinedOption.tuition_count || individualTuitions.length} tuitions (Mandatory)</div>
+                  </div>
+                  <div style="text-align:right;">
+                    <div style="font-weight:bold;font-size:1.3em;color:#0b74de;">${(totalAmount/100).toFixed(2)} VND</div>
+                  </div>
+                </div>
+                <button 
+                  onclick="window.selectTuition(${combinedOption.id},${totalAmount})" 
+                  class="select-tuition-btn pay-all-btn btn ${canPayTuition(totalAmount) ? 'btn-primary' : 'btn-secondary'}"
+                  ${canPayTuition(totalAmount) ? '' : 'disabled'}
+                  style="width:100%;padding:12px;font-size:1.1em;font-weight:bold;background-color:#0b74de;border-color:#0b74de;"
+                >
+                  Pay All Tuitions
+                </button>
+              </div>
+            `;
+          }
+        } else {
+          // Regular display for other students (with select buttons)
+          html = tuitions.map(t => {
+            const isCombined = t.is_combined === true || t.id === 0;
+            const displayId = isCombined ? 'Combined' : `#${t.id}`;
+            const displayInfo = isCombined 
+              ? `All Pending Tuitions (${t.tuition_count || 'multiple'})`
+              : `${t.academic_year || ''} ${t.academic_year ? `(Semester ${t.semester})` : ''}`.trim();
+            return `
+            <div class="tuition-row">
+              <div style="font-weight:600;color:#0b74de">${displayId}</div>
+              <div>${displayInfo}</div>
+              <div>${t.description || 'Tuition Payment'}</div>
+              <div style="text-align:right;font-weight:${isCombined ? 'bold' : 'normal'}">${(t.amount_cents/100).toFixed(2)}</div>
+              <div>
+                <button 
+                  onclick="window.selectTuition(${t.id},${t.amount_cents})" 
+                  class="select-tuition-btn btn ${canPayTuition(t.amount_cents) ? 'btn-primary' : ''}"
+                  ${canPayTuition(t.amount_cents) ? '' : 'disabled'}
+                  title="${isCombined ? 'Combined Payment' : `Tuition ID: ${t.id}`}"
+                >
+                  Select
+                </button>
+              </div>
+            </div>
+          `;
+          }).join('');
+        }
+        
+        $('tuitionRows').innerHTML = html;
       }
     }
   } catch (e) {
@@ -173,14 +230,26 @@ window.selectTuition = function(tuitionId, amountCents) {
   selectedTuitionPublicId = tuitionId;
   selectedTuitionAmount = amountCents;
   
-  // Update UI
+  // Update UI - reset all buttons
   document.querySelectorAll('.select-tuition-btn').forEach(btn => {
-    btn.style.background = '';
-    btn.textContent = 'Select';
+    if (btn.classList.contains('pay-all-btn')) {
+      btn.style.background = '#0b74de';
+      btn.textContent = 'Pay All Tuitions';
+    } else {
+      btn.style.background = '';
+      btn.textContent = 'Select';
+    }
   });
+  
+  // Update the clicked button
   const btn = event.target;
-  btn.style.background = '#4CAF50';
-  btn.textContent = 'Selected';
+  if (btn.classList.contains('pay-all-btn')) {
+    btn.style.background = '#28a745';
+    btn.textContent = 'Selected - Pay All Tuitions';
+  } else {
+    btn.style.background = '#4CAF50';
+    btn.textContent = 'Selected';
+  }
   
   validateForm();
 };
@@ -192,7 +261,8 @@ function validateForm() {
   const profile = JSON.parse(localStorage.getItem('profile') || '{}');
   const payer_balance = profile.balance_cents || 0;
   
-  const can = selectedTuitionPublicId != null && // tuition selected
+  // Allow tuitionId = 0 for combined payment
+  const can = (selectedTuitionPublicId !== null && selectedTuitionPublicId !== undefined) && // tuition selected (including 0 for combined)
             selectedTuitionAmount > 0 && // valid amount
             payer_balance >= selectedTuitionAmount && // has enough balance
             $('studentName').value && // has student name (valid lookup)
@@ -218,7 +288,8 @@ async function startTransaction() {
     alert('Please lookup a student before starting a transaction');
     return;
   }
-  if (!selectedTuitionPublicId) {
+  // Allow tuitionId = 0 for combined payment (check for null/undefined, not falsy)
+  if (selectedTuitionPublicId === null || selectedTuitionPublicId === undefined) {
     alert('Please select a tuition to pay');
     return;
   }

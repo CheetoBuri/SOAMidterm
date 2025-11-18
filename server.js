@@ -149,27 +149,57 @@ app.post('/api/login', loginHandler);
  *                       example: "Tran Van A"
  *                     pending_tuitions:
  *                       type: array
- *                       description: List of pending tuition records
+ *                       description: |
+ *                         List of pending tuition records.
+ *                         
+ *                         **Special behavior for student 20190001 with multiple tuitions:**
+ *                         - Individual tuitions are listed first (read-only, for information only)
+ *                         - A combined payment option (id=0, mandatory=true) is included at the end
+ *                         - Individual tuitions cannot be paid separately - only the combined option (id=0) can be used for payment
+ *                         - This ensures all pending tuitions are paid together in a single transaction
  *                       items:
  *                         type: object
  *                         properties:
  *                           id:
  *                             type: integer
- *                             description: Tuition record ID (use this ID for payment)
+ *                             description: |
+ *                               Tuition record ID.
+ *                               - For regular students: Use this ID to pay individual tuitions
+ *                               - For student 20190001 with multiple tuitions: Individual tuition IDs are read-only (cannot be used for payment). Only id=0 (combined payment) can be used.
  *                             example: 1
  *                           academic_year:
  *                             type: integer
+ *                             nullable: true
+ *                             description: Academic year (null for combined payment option)
  *                             example: 2023
  *                           semester:
  *                             type: integer
+ *                             nullable: true
+ *                             description: Semester number (null for combined payment option)
  *                             example: 1
  *                           amount_cents:
  *                             type: integer
- *                             description: Amount in cents
+ *                             description: Amount in cents (for combined payment, this is the total of all tuitions)
  *                             example: 50000
  *                           description:
  *                             type: string
  *                             example: "Fall 2023 Semester Tuition"
+ *                           read_only:
+ *                             type: boolean
+ *                             description: True if this tuition is read-only (individual tuition for student 20190001, cannot be paid separately)
+ *                             example: false
+ *                           is_combined:
+ *                             type: boolean
+ *                             description: True if this is a combined payment option (student 20190001 only)
+ *                             example: false
+ *                           mandatory:
+ *                             type: boolean
+ *                             description: True if this payment option is mandatory (combined payment for student 20190001)
+ *                             example: false
+ *                           tuition_count:
+ *                             type: integer
+ *                             description: Number of tuitions included in combined payment (only for combined option)
+ *                             example: 2
  *       401:
  *         description: Unauthorized - Missing or invalid token
  *         content:
@@ -217,8 +247,16 @@ app.get('/api/student/:studentId', authMiddleware, getStudentHandler);
  *                 example: "20190001"
  *               tuitionId:
  *                 type: integer
- *                 description: Per-student tuition ID (as shown in /api/student/{studentId})
- *                 example: 1
+ *                 description: |
+ *                   Per-student tuition ID (as shown in /api/student/{studentId}).
+ *                   
+ *                   **Special rules for student 20190001 with multiple pending tuitions:**
+ *                   - Individual tuition IDs (1, 2, etc.) are NOT accepted - they are read-only for information only
+ *                   - **MUST use tuitionId = 0** to pay all tuitions combined in a single transaction
+ *                   - This is mandatory - individual tuitions cannot be paid separately
+ *                   
+ *                   For other students, use the tuition ID from the pending_tuitions list.
+ *                 example: 0
  *     responses:
  *       200:
  *         description: Transaction started successfully
@@ -229,9 +267,18 @@ app.get('/api/student/:studentId', authMiddleware, getStudentHandler);
  *               properties:
  *                 transactionId:
  *                   type: integer
+ *                   description: Transaction ID (for combined payments, this is the group ID)
  *                 otpExpiresAt:
  *                   type: string
  *                   format: date-time
+ *                 isCombined:
+ *                   type: boolean
+ *                   description: True if this is a combined payment (only for student 20190001)
+ *                   example: true
+ *                 tuitionCount:
+ *                   type: integer
+ *                   description: Number of tuitions included in combined payment (only for combined payments)
+ *                   example: 2
  *       400:
  *         description: Bad request
  *         content:
