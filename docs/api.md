@@ -136,14 +136,16 @@ Get transaction history for current user.
       "id": "number",
       "amount_cents": "number",
       "status": "string",
-      "created_at": "string (ISO date)",
-      "confirmed_at": "string (ISO date)",
+      "created_at": "string (ISO date, Asia/Ho_Chi_Minh timezone)",
+      "confirmed_at": "string (ISO date, Asia/Ho_Chi_Minh timezone)",
       "mssv": "string",
       "student_name": "string"
     }
   ]
 }
 ```
+
+> **Note:** `created_at` and `confirmed_at` are returned in the Vietnam timezone (`Asia/Ho_Chi_Minh`, UTC+07:00) so that Swagger responses match the frontend UI display.
 
 ## Profile
 

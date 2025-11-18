@@ -23,6 +23,8 @@ let selectedTuitionAmount = null;
 let currentStudentMssv = null;
 let otpTimerHandle = null;
 let resendCooldownHandle = null;
+let lookupInProgress = false;
+let pendingLookupId = null;
 
 /**
  * Initialize the payment page
@@ -47,9 +49,6 @@ window.addEventListener('DOMContentLoaded', () => {
         ev.preventDefault();
         await doLookup();
       }
-    });
-    studentInput.addEventListener('blur', async () => {
-      if (studentInput.value.trim()) await doLookup();
     });
     studentInput.addEventListener('input', () => {
       currentStudentMssv = null;
@@ -80,7 +79,8 @@ window.addEventListener('DOMContentLoaded', () => {
 /**
  * Look up a student's tuition records
  */
-async function doLookup() {
+async function doLookup(forcedStudentId) {
+  const studentInput = $('studentId');
   log('Looking up student...');
   const token = localStorage.getItem('token');
   if (!token) {
@@ -89,16 +89,24 @@ async function doLookup() {
     return;
   }
 
-  const studentId = $('studentId').value.trim();
+  const studentId = (typeof forcedStudentId === 'string' ? forcedStudentId : (studentInput ? studentInput.value : '')).trim();
   if (!studentId) {
     log('No student ID entered, skipping lookup');
     return;
   }
 
+  if (lookupInProgress) {
+    pendingLookupId = studentId;
+    return;
+  }
+  lookupInProgress = true;
+
   log('Fetching student:', studentId);
   $('lookupBtn').disabled = true;
   clearPaymentForm();
-  $('studentId').value = studentId;
+  if (studentInput) {
+    studentInput.value = studentId;
+  }
   currentStudentMssv = null;
   selectedTuitionPublicId = null;
   selectedTuitionAmount = null;
@@ -207,6 +215,14 @@ async function doLookup() {
     alert('Network error looking up student. Please try again.');
   } finally {
     $('lookupBtn').disabled = false;
+    lookupInProgress = false;
+    if (pendingLookupId && pendingLookupId !== studentId) {
+      const nextId = pendingLookupId;
+      pendingLookupId = null;
+      setTimeout(() => doLookup(nextId), 0);
+    } else {
+      pendingLookupId = null;
+    }
   }
 }
 

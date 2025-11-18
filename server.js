@@ -16,6 +16,29 @@ app.use(cors({
   origin: ['http://127.0.0.1:5500', 'http://localhost:5500'],
   credentials: true
 }));
+
+// Middleware to override date header with Vietnam timezone
+app.use((req, res, next) => {
+  const originalJson = res.json;
+  res.json = function(data) {
+    // Set date header with Vietnam timezone format
+    const vietnamDate = new Date().toLocaleString('en-US', { 
+      timeZone: 'Asia/Ho_Chi_Minh',
+      weekday: 'short',
+      year: 'numeric',
+      month: 'short',
+      day: '2-digit',
+      hour: '2-digit',
+      minute: '2-digit',
+      second: '2-digit',
+      hour12: false
+    });
+    res.set('date', vietnamDate + ' +07:00');
+    return originalJson.call(this, data);
+  };
+  next();
+});
+
 app.use(bodyParser.json());
 app.use(express.static('public'));
 
@@ -449,6 +472,34 @@ app.post('/api/transactions/delete', authMiddleware, deleteTransactionHandler);
  *     responses:
  *       200:
  *         description: Transaction history
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *               properties:
+ *                 transactions:
+ *                   type: array
+ *                   items:
+ *                     type: object
+ *                     properties:
+ *                       id:
+ *                         type: integer
+ *                       amount_cents:
+ *                         type: integer
+ *                       status:
+ *                         type: string
+ *                       created_at:
+ *                         type: string
+ *                         description: ISO string in Asia/Ho_Chi_Minh timezone (UTC+07:00)
+ *                         example: "2025-11-18T13:45:12+07:00"
+ *                       confirmed_at:
+ *                         type: string
+ *                         nullable: true
+ *                         description: ISO string in Asia/Ho_Chi_Minh timezone (UTC+07:00)
+ *                       mssv:
+ *                         type: string
+ *                       student_name:
+ *                         type: string
  */
 app.get('/api/transactions/history', authMiddleware, historyHandler);
 
@@ -470,3 +521,17 @@ const PORT = process.env.PORT || 3000;
 app.listen(PORT, () => {
   console.log(`Server listening on port ${PORT}`);
 });
+
+function toAppTimezoneIso(dateTime) {
+  if (!dateTime) return null;
+  // Convert to Asia/Ho_Chi_Minh timezone (UTC+07:00) and format as ISO string
+  return new Date(dateTime + 'Z').toLocaleString('sv-SE', { timeZone: 'Asia/Ho_Chi_Minh' }).replace('T', ' ').replace('Z', '');
+}
+
+function convertTransactionRows(rows) {
+  const transactions = rows.map((row) => ({
+    ...row,
+    created_at: toAppTimezoneIso(row.created_at),
+    confirmed_at: toAppTimezoneIso(row.confirmed_at)
+  }));
+}

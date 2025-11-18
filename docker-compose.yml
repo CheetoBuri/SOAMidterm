@@ -15,6 +15,10 @@ services:
       - DB_PASSWORD=ibankpass
       - DB_NAME=ibank
       - JWT_SECRET=devsecret
+      - TZ=Asia/Ho_Chi_Minh
+      - APP_TIMEZONE=Asia/Ho_Chi_Minh
+      - APP_TIMEZONE_OFFSET=+07:00
+      - APP_TIMEZONE_OFFSET_MINUTES=420
     depends_on:
       - mysql
 
@@ -26,6 +30,8 @@ services:
       - MYSQL_USER=ibankuser
       - MYSQL_PASSWORD=ibankpass
       - MYSQL_ROOT_PASSWORD=rootpass
+      - TZ=Asia/Ho_Chi_Minh
+    command: --default-time-zone=+07:00
     ports:
       - "3306:3306"
     volumes:

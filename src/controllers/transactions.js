@@ -1,6 +1,22 @@
 const pool = require('../db');
 const { generateOtp, hashOtp, sendOtpEmail, sendConfirmationEmail, OTP_TTL_MIN } = require('../mailer');
 
+const APP_TIMEZONE = process.env.APP_TIMEZONE || 'Asia/Ho_Chi_Minh';
+const APP_TIMEZONE_OFFSET = process.env.APP_TIMEZONE_OFFSET || '+07:00';
+const APP_TIMEZONE_OFFSET_MINUTES = Number(process.env.APP_TIMEZONE_OFFSET_MINUTES || 7 * 60);
+
+function toAppTimezoneIso(dateValue) {
+  if (!dateValue) return null;
+  const baseDate = new Date(dateValue);
+  if (Number.isNaN(baseDate.getTime())) return null;
+
+  // Shift the UTC timestamp by configured offset (default +07:00)
+  const offsetMs = APP_TIMEZONE_OFFSET_MINUTES * 60 * 1000;
+  const shifted = new Date(baseDate.getTime() + offsetMs);
+  const iso = shifted.toISOString().replace(/\.\d{3}Z$/, '');
+  return `${iso}${APP_TIMEZONE_OFFSET}`;
+}
+
 async function startTransactionHandler(req, res) {
   try {
     const { studentId, tuitionId } = req.body;
@@ -333,7 +349,14 @@ async function historyHandler(req, res) {
       ORDER BY t.created_at DESC 
       LIMIT 100
     `, [req.user.id]);
-    res.json({ transactions: rows });
+
+    const transactions = rows.map((row) => ({
+      ...row,
+      created_at: toAppTimezoneIso(row.created_at),
+      confirmed_at: toAppTimezoneIso(row.confirmed_at)
+    }));
+
+    res.json({ transactions });
   } catch (err) {
     console.error(err);
     res.status(500).json({ error: 'server_error' });
